@@ -1,0 +1,33 @@
+! Turkish noun plural lexicon (minimal example)
+! Covers basic e-type vowel harmony for the plural suffix -lAr
+! A is an archiphoneme resolved by phonological rules (A -> e after front vowels, A -> a after back vowels)
+
+Multichar_Symbols
+  +N        ! Noun
+  +Pl       ! Plural
+  +Sg       ! Singular
+  +Nom      ! Nominative (no case suffix)
+
+LEXICON Root
+  Noun ;
+
+LEXICON Noun
+  ev       NounStem ;    ! house    (front vowel → evler)
+  kitap    NounStem ;    ! book     (back vowel  → kitaplar)
+  göz      NounStem ;    ! eye      (front vowel → gözler)
+  araba    NounStem ;    ! car      (back vowel  → arabalar)
+  fil      NounStem ;    ! elephant (front vowel → filler)
+  köy      NounStem ;    ! village  (front vowel → köyler)
+  odun     NounStem ;    ! wood     (back vowel  → odunlar)
+  ırk      NounStem ;    ! race     (back vowel  → ırklar)
+  göğüs    NounStem ;    ! chest    (front vowel → göğüsler)
+
+LEXICON NounStem
+  +N:0     Number ;      ! tag as noun, epsilon on surface
+
+LEXICON Number
+  +Sg:0    Case ;        ! singular = no suffix
+  +Pl:lAr  Case ;        ! plural = lAr (A resolved by phonology)
+
+LEXICON Case
+  +Nom:0   # ;           ! nominative = no suffix, end of word
