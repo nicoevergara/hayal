@@ -2,44 +2,50 @@ use nom::{
     IResult, Parser,
     branch::{alt, permutation},
     bytes::complete::{tag, take_until, take_while1},
-    character::{
-        MultiSpace0,
-        complete::{line_ending, multispace0, not_line_ending, space0, space1},
-    },
+    character::complete::{line_ending, multispace0, not_line_ending, space0, space1},
     combinator::{opt, recognize, rest, verify},
     error::{ErrorKind, make_error},
     multi::{fold_many1, many0},
     sequence::{delimited, preceded, separated_pair, terminated},
 };
 
-use std::fs;
+use super::ast::{
+    COMMENT_MARKER_CHAR, COMMENT_MARKER_STR, END_OF_WORD_MARKER_CHAR, END_OF_WORD_MARKER_STR,
+    LEXICON_KEYWORD, LEXICON_RULE_ENTRY_FORM_SEPARATOR_CHAR, LEXICON_RULE_ENTRY_FORM_SEPARATOR_STR,
+    LEXICON_RULE_ENTRY_SEPARATOR_CHAR, LEXICON_RULE_ENTRY_SEPARATOR_STR, LexcFile, LexiconBlock,
+    LexiconEntry, MULTICHAR_SYMBOLS_KEYWORD, MultiCharSymbol,
+};
+use super::error::LexcError;
 
-const LEXICON_KEYWORD: &str = "LEXICON";
-const MULTICHAR_SYMBOLS_KEYWORD: &str = "Multichar_Symbols";
-const END_OF_WORD_MARKER_STR: &str = "#";
-const END_OF_WORD_MARKER_CHAR: char = '#';
-const COMMENT_MARKER_STR: &str = "!";
-const COMMENT_MARKER_CHAR: char = '!';
-const LEXICON_RULE_ENTRY_SEPARATOR_STR: &str = ";";
-const LEXICON_RULE_ENTRY_SEPARATOR_CHAR: char = ';';
-const LEXICON_RULE_ENTRY_FORM_SEPARATOR_STR: &str = ":";
-const LEXICON_RULE_ENTRY_FORM_SEPARATOR_CHAR: char = ':';
-
+/// Parses a .lexc file into an AST.
 pub struct LexcParser {}
 
 impl LexcParser {
+    /// Create an empty parser
     pub fn new() -> Self {
         Self {}
     }
 
-    pub fn parse(&self, raw_text: &str) -> Result<LexcTokens, LexcError> {
+    /// Parses a lexc file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hayal::lexc::LexcParser;
+    ///
+    /// let parser = LexcParser::new();
+    /// let result = parser.parse("LEXICON Root\nkedi Noun ;\n");
+    /// assert!(result.is_ok());
+    /// ```
+    // TODO: allow for a text file to be passed in
+    pub fn parse(&self, raw_text: &str) -> Result<LexcFile, LexcError> {
         let sanitized_text = raw_text.trim();
-        let tokens = self.tokenize(sanitized_text);
-        tokens
+        self.tokenize(sanitized_text)
     }
 
-    fn tokenize(&self, text: &str) -> Result<LexcTokens, LexcError> {
-        let mut lexc_tokens = LexcTokens::new();
+    /// Tokenize and parse a .lexc file's input and return a [LexcFile] or [LexcError]
+    fn tokenize(&self, text: &str) -> Result<LexcFile, LexcError> {
+        let mut lexc_tokens = LexcFile::new();
         let result = parse_multichar_symbols_section(text);
         if let Err(error) = result {
             dbg!(error);
@@ -49,137 +55,38 @@ impl LexcParser {
             Ok(value) => value,
             Err(_) => return Err(LexcError::ParsingError),
         };
-        lexc_tokens.multichar_symbols = multichar_symbols_tokens;
+        lexc_tokens = multichar_symbols_tokens
+            .into_iter()
+            .fold(lexc_tokens, |lexc_tokens, multichar_symbol| {
+                lexc_tokens.add_multichar_symbol(multichar_symbol)
+            });
 
         return match parse_lexicon_section(remaining) {
             Ok((_, lexicon_blocks)) => {
-                lexc_tokens.lexicon_blocks = lexicon_blocks;
+                lexc_tokens = lexicon_blocks
+                    .into_iter()
+                    .fold(lexc_tokens, |lexc_tokens, block| {
+                        lexc_tokens.add_lexicon_block(block)
+                    });
                 Ok(lexc_tokens)
             }
-            Err(_) => Err(LexcError::ParsingError),
+            Err(error) => {
+                dbg!(error);
+                Err(LexcError::ParsingError)
+            }
         };
     }
 }
 
-#[derive(Debug)]
-pub enum LexcError {
-    ParsingError,
-}
-
-impl<'a> nom::error::ParseError<&'a str> for LexcError {
-    fn from_error_kind(input: &'a str, kind: nom::error::ErrorKind) -> Self {
-        LexcError::ParsingError
-    }
-
-    fn append(input: &'a str, kind: nom::error::ErrorKind, sub: Self) -> Self {
-        sub
-    }
-}
-
-#[derive(Debug)]
-pub struct LexcTokens {
-    multichar_symbols: Vec<MultiCharSymbol>,
-    lexicon_blocks: Vec<LexiconBlock>,
-}
-
-impl LexcTokens {
-    pub fn new() -> Self {
-        Self {
-            multichar_symbols: Vec::new(),
-            lexicon_blocks: Vec::new(),
-        }
-    }
-}
-
-// Represents a single lexicon entry following the pattern:
-// [optional_analysis_form[:optional_surface_form]] continuation_class ;
-//
-// The colon separates the analysis (upper) side from the surface (lower) side:
-//   - analysis_form: what appears on the analysis side, e.g. +Pl (the morphological tag)
-//   - surface_form:  what appears on the surface side, e.g. lAr (the actual string)
-//
-// Examples:
-//   Noun ;               — no form, just a continuation class
-//   ev NounStem ;        — analysis and surface are the same (no colon needed)
-//   +Pl:lAr Case ;       — +Pl on analysis side, lAr on surface side
-//   ev NounStem ; ! house — with optional trailing comment
-#[derive(Debug, PartialEq, Clone)]
-struct LexiconEntry {
-    surface_form: Option<String>,
-    analysis_form: Option<String>,
-    continuation_class: String,
-    comment: Option<String>,
-}
-
-impl LexiconEntry {
-    pub fn new(continuation_class: String) -> Self {
-        Self {
-            surface_form: None,
-            analysis_form: None,
-            continuation_class,
-            comment: None,
-        }
-    }
-
-    fn surface_form(mut self, surface_form: Option<&str>) -> Self {
-        self.surface_form = surface_form.map(|s| s.to_string());
-        self
-    }
-
-    fn analysis_form(mut self, analysis_form: Option<&str>) -> Self {
-        self.analysis_form = analysis_form.map(|s| s.to_string());
-        self
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MultiCharSymbol {
-    symbol: String,
-    comment: Option<LexcComment>,
-}
-
-impl MultiCharSymbol {
-    pub fn new(symbol: String) -> Self {
-        Self {
-            symbol,
-            comment: None,
-        }
-    }
-
-    pub fn add_comment(mut self, comment: Option<LexcComment>) -> Self {
-        self.comment = comment;
-        self
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct LexcComment(String);
-
-#[derive(Debug, PartialEq)]
-pub struct LexiconBlock {
-    pub name: String,
-    pub entries: Vec<LexiconEntry>,
-    pub comment: Option<String>,
-}
-
-impl LexiconBlock {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            entries: Vec::new(),
-            comment: None,
-        }
-    }
-
-    pub fn add_comment(mut self, comment: Option<String>) -> Self {
-        self.comment = comment;
-        self
-    }
-
-    pub fn add_lexicon_entry(mut self, entry: LexiconEntry) -> Self {
-        self.entries.push(entry);
-        self
-    }
+fn parse_continuation_class<'a>(text: &'a str) -> IResult<&'a str, &'a str> {
+    let (remaining, ident) = take_while1(|c: char| {
+        !c.is_control()
+            && !c.is_whitespace()
+            && c != COMMENT_MARKER_CHAR
+            && c != LEXICON_RULE_ENTRY_SEPARATOR_CHAR
+            && c != LEXICON_RULE_ENTRY_FORM_SEPARATOR_CHAR
+    })(text)?;
+    Ok((remaining, ident))
 }
 
 fn parse_identifier<'a>(text: &'a str) -> IResult<&'a str, &'a str> {
@@ -294,8 +201,8 @@ fn parse_lexicon_rule_entry<'a>(text: &'a str) -> IResult<&'a str, LexiconEntry>
             terminated(
                 (
                     opt(parse_lexicon_rule_entry_form),
-                    preceded(space0, parse_identifier),
-                    opt(preceded(space0, parse_identifier)),
+                    preceded(space0, alt((parse_identifier, parse_continuation_class))),
+                    opt(preceded(space0, parse_continuation_class)),
                 ),
                 preceded(space0, tag(LEXICON_RULE_ENTRY_SEPARATOR_STR)),
             ),
@@ -317,10 +224,14 @@ fn parse_lexicon_rule_entry<'a>(text: &'a str) -> IResult<&'a str, LexiconEntry>
         (None, continuation_class, None) => {
             Ok((remaining, LexiconEntry::new(continuation_class.to_string())))
         }
-        (None, surface_form, Some(continuation_class)) => Ok((
-            remaining,
-            LexiconEntry::new(continuation_class.to_string()).surface_form(Some(surface_form)),
-        )),
+        (None, surface_form, Some(continuation_class)) => match surface_form {
+            // a surface form of '#' isn't allowed
+            END_OF_WORD_MARKER_STR => Err(nom::Err::Error(make_error(text, ErrorKind::Verify))),
+            _ => Ok((
+                remaining,
+                LexiconEntry::new(continuation_class.to_string()).surface_form(Some(surface_form)),
+            )),
+        },
         _ => Err(nom::Err::Error(make_error(text, ErrorKind::Verify))),
     }
 }
@@ -366,7 +277,7 @@ fn parse_lexicon_section<'a>(text: &'a str) -> IResult<&'a str, Vec<LexiconBlock
 
 #[cfg(test)]
 mod tests {
-    use nom::Input;
+    use std::fs;
 
     use super::*;
 
@@ -610,71 +521,79 @@ mod tests {
 
         let lexc_tokens = result.unwrap();
 
-        // Multichar_Symbols
-        assert_eq!(
-            lexc_tokens.multichar_symbols,
-            vec![
-                MultiCharSymbol::new("+N".to_string()),
-                MultiCharSymbol::new("+Pl".to_string()),
-                MultiCharSymbol::new("+Sg".to_string()),
-                MultiCharSymbol::new("+Nom".to_string())
-            ]
-        );
-
-        assert_eq!(
-            lexc_tokens.lexicon_blocks,
-            vec![
-                // LEXICON Root
+        let expected = LexcFile::new()
+            // Multichar_Symbols
+            .add_multichar_symbol(MultiCharSymbol::new("+N".to_string()))
+            .add_multichar_symbol(MultiCharSymbol::new("+Pl".to_string()))
+            .add_multichar_symbol(MultiCharSymbol::new("+Sg".to_string()))
+            .add_multichar_symbol(MultiCharSymbol::new("+Nom".to_string()))
+            // LEXICON Root
+            .add_lexicon_block(
                 LexiconBlock::new("Root".to_string())
                     .add_lexicon_entry(LexiconEntry::new("Noun".to_string())),
-                // LEXICON Noun
+            )
+            // LEXICON Noun
+            .add_lexicon_block(
                 LexiconBlock::new("Noun".to_string())
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("ev"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("ev")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("kitap"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("kitap")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("göz"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("göz")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("araba"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("araba")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("fil"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("fil")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("köy"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("köy")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("odun"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("odun")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("ırk"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("ırk")),
                     )
                     .add_lexicon_entry(
-                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("göğüs"))
+                        LexiconEntry::new("NounStem".to_string()).surface_form(Some("göğüs")),
                     ),
-                // LEXICON NounStem
+            )
+            // LEXICON NounStem
+            .add_lexicon_block(
                 LexiconBlock::new("NounStem".to_string()).add_lexicon_entry(
                     LexiconEntry::new("Number".to_string())
                         .surface_form(Some("+N"))
-                        .analysis_form(Some("0"))
+                        .analysis_form(Some("0")),
                 ),
-                // LEXICON Number
+            )
+            // LEXICON Number
+            .add_lexicon_block(
                 LexiconBlock::new("Number".to_string())
                     .add_lexicon_entry(
                         LexiconEntry::new("Case".to_string())
                             .surface_form(Some("+Sg"))
-                            .analysis_form(Some("0"))
+                            .analysis_form(Some("0")),
                     )
                     .add_lexicon_entry(
                         LexiconEntry::new("Case".to_string())
                             .surface_form(Some("+Pl"))
-                            .analysis_form(Some("lAr"))
+                            .analysis_form(Some("lAr")),
                     ),
-            ]
-        );
+            )
+            // LEXICON Case
+            .add_lexicon_block(
+                LexiconBlock::new("Case".to_string()).add_lexicon_entry(
+                    LexiconEntry::new("#".to_string())
+                        .surface_form(Some("+Nom"))
+                        .analysis_form(Some("0")),
+                ),
+            );
+
+        assert_eq!(lexc_tokens, expected);
     }
 }

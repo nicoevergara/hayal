@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::Parser;
-use lexc::parser::LexcParser;
+use lexc::{LexcFile, LexcParser};
 
 #[derive(Parser)]
 #[command(version = "0.1.0")]
@@ -28,7 +28,7 @@ fn main() {
     };
 
     let lexc_parser = LexcParser::new();
-    let tokens = match lexc_parser.parse(&file_content) {
+    let lexc_tokens: LexcFile = match lexc_parser.parse(&file_content) {
         Ok(tokens) => tokens,
         Err(e) => {
             eprintln!("Error parsing file: {:?}", e);
