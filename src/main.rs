@@ -3,8 +3,8 @@ mod lexc;
 use std::fs;
 use std::path::PathBuf;
 
-use clap::Parser;
-use lexc::{LexcFile, LexcParser};
+use clap::{ArgAction, Parser};
+use lexc::{LexcFile, LexcParser, validate_file};
 
 #[derive(Parser)]
 #[command(version = "0.1.0")]
@@ -13,8 +13,8 @@ use lexc::{LexcFile, LexcParser};
 struct Cli {
     #[arg(short = 'f', long = "file")]
     input_file: PathBuf,
-    #[arg(long = "validate", requires = "input_file")]
-    validate: Option<bool>,
+    #[arg(long = "validate", requires = "input_file", action = ArgAction::SetTrue)]
+    validate: bool,
 }
 
 fn main() {
@@ -28,11 +28,23 @@ fn main() {
     };
 
     let lexc_parser = LexcParser::new();
-    let lexc_tokens: LexcFile = match lexc_parser.parse(&file_content) {
-        Ok(tokens) => tokens,
+
+    println!(
+        "Reading {} ...",
+        &cli.input_file.as_path().to_str().unwrap()
+    );
+
+    let lexc_file: LexcFile = match lexc_parser.parse(&file_content) {
+        Ok(lexc_file) => lexc_file,
         Err(e) => {
             eprintln!("Error parsing file: {:?}", e);
             std::process::exit(1);
         }
     };
+
+    if cli.validate {
+        lexc_file.validate();
+    }
+
+    println!("{}", lexc_file);
 }

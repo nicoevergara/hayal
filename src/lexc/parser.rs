@@ -17,13 +17,40 @@ use super::ast::{
 };
 use super::error::LexcError;
 
+use std::fs::{File, read_to_string};
+use std::path::PathBuf;
+
 /// Parses a .lexc file into an AST.
-pub struct LexcParser {}
+pub struct LexcParser {
+    file_path: Option<String>,
+    lexc_file_contents: Option<String>,
+}
 
 impl LexcParser {
     /// Create an empty parser
     pub fn new() -> Self {
-        Self {}
+        Self {
+            file_path: None,
+            lexc_file_contents: None,
+        }
+    }
+
+    pub fn lexc_file(mut self, file_path: &str) -> Self {
+        let mut path_buf = PathBuf::new();
+        path_buf.push(file_path.to_string());
+        if !path_buf.is_file() {
+            panic!("File not found: {}", file_path);
+        }
+        self.file_path = Some(file_path.to_string());
+        let lexc_file_contents = read_to_string(path_buf);
+        self.lexc_file_contents = match lexc_file_contents {
+            Ok(contents) => Some(contents),
+            Err(e) => {
+                eprintln!("Error reading file: {}", e);
+                std::process::exit(1);
+            }
+        };
+        self
     }
 
     /// Parses a lexc file.

@@ -1,3 +1,5 @@
+use std::fmt;
+
 pub const LEXICON_KEYWORD: &str = "LEXICON";
 pub const MULTICHAR_SYMBOLS_KEYWORD: &str = "Multichar_Symbols";
 pub const END_OF_WORD_MARKER_STR: &str = "#";
@@ -16,6 +18,18 @@ pub struct LexcFile {
 }
 
 impl LexcFile {
+    /// Creates a new LexcFile
+    /// # Returns
+    ///
+    /// Returns an empty `LexcFile`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hayal::lexc::ast::LexcFile;
+    ///
+    /// let lexc_file = LexcFile::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             multichar_symbols: Vec::new(),
@@ -23,14 +37,20 @@ impl LexcFile {
         }
     }
 
+    /// Adds a `MultiCharSymbol` to the `LexcFile`.
     pub fn add_multichar_symbol(mut self, multichar_symbol: MultiCharSymbol) -> Self {
         self.multichar_symbols.push(multichar_symbol);
         self
     }
 
+    /// Adds a `LexiconBlock` to the `LexcFile`.
     pub fn add_lexicon_block(mut self, lexicon_block: LexiconBlock) -> Self {
         self.lexicon_blocks.push(lexicon_block);
         self
+    }
+
+    pub fn validate(&self) -> bool {
+        true
     }
 }
 
@@ -75,6 +95,18 @@ impl LexiconEntry {
     }
 }
 
+impl fmt::Display for LexiconEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(analysis_form) = &self.analysis_form {
+            writeln!(f, "Analysis Form: {}", analysis_form);
+        }
+        if let Some(surface_form) = &self.surface_form {
+            writeln!(f, "Surface Form: {}", surface_form);
+        }
+        writeln!(f, "Continuation Class: {}", self.continuation_class)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct MultiCharSymbol {
     symbol: String,
@@ -92,6 +124,12 @@ impl MultiCharSymbol {
     pub fn add_comment(mut self, comment: Option<LexcComment>) -> Self {
         self.comment = comment;
         self
+    }
+}
+
+impl fmt::Display for MultiCharSymbol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.symbol)
     }
 }
 
@@ -122,6 +160,31 @@ impl LexiconBlock {
     pub fn add_lexicon_entry(mut self, entry: LexiconEntry) -> Self {
         self.entries.push(entry);
         self
+    }
+}
+
+impl fmt::Display for LexiconBlock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "LEXICON {}", self.name);
+        for entry in &self.entries {
+            writeln!(f, "{}", entry);
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for LexcFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "LexcFile");
+        writeln!(f, "MultiChar Symbols");
+        for symbol in &self.multichar_symbols {
+            writeln!(f, "{}", symbol);
+        }
+        writeln!(f, "\nLexicon Blocks");
+        for lexicon_block in &self.lexicon_blocks {
+            writeln!(f, "{}", lexicon_block);
+        }
+        Ok(())
     }
 }
 

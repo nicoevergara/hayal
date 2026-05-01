@@ -26,6 +26,28 @@ Multichar_Symbols +N +V +Pl +Sg +Past
 - Must appear before any `LEXICON` blocks
 - Declares symbol sequences that should be treated as single atomic units
 - Space-separated list of symbols
+- Without declaration, multi-character sequences like `+Pl` would be parsed as individual characters (`+`, `P`, `l`)
+
+### Format
+
+A multichar symbol is technically any sequence of non-whitespace characters. However, conventions exist for readability and to avoid conflicts with reserved syntax characters.
+
+| Convention | Use case | Examples |
+|------------|----------|----------|
+| `+` prefix | Grammatical/morphosyntactic tags | `+N`, `+V`, `+Pl`, `+Sg`, `+Past`, `+3P` |
+| `@...@` | Flag diacritics (co-occurrence constraints) | `@P.UN.ON@`, `@D.UN@`, `@C.UN@` |
+| `^` prefix | Morpheme boundary markers | `^s`, `^ed`, `^ing` |
+
+### Restrictions
+
+Multichar symbols should avoid characters that have special meaning in lexc syntax:
+
+- `:` (form separator)
+- `;` (entry terminator)
+- `!` (comment marker)
+- `#` (end-of-word marker)
+
+Using these characters within a multichar symbol would create ambiguity in entry parsing.
 
 ## Lexicon Blocks
 
